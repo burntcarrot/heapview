@@ -1,0 +1,16 @@
+project_name: heapview
+
+builds:
+  - id: "heapview"
+    binary: heapview
+    goos:
+      - linux
+      - darwin
+      - windows
+      - openbsd
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    env:
+    - CGO_ENABLED=0

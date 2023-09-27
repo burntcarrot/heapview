@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>HeapView</title>
+    <style>
+        body {
+            display: grid;
+            grid-template-columns: 220px 1fr;
+            grid-template-rows: auto auto 1fr auto;
+            grid-template-areas:
+                "header header"
+                "tabs tabs"
+                "sidebar content"
+                "footer footer";
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        header {
+            grid-area: header;
+            background-color: black;
+            color: white;
+            padding: 10px;
+            text-align: center;
+        }
+
+        footer {
+            grid-area: footer;
+            background-color: black;
+            color: white;
+            padding: 10px;
+            text-align: center;
+        }
+
+        #tabs {
+            grid-area: tabs;
+            padding: 10px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .tab-button:not(:last-child) {
+            margin-right: 5px;
+        }
+
+        .tab-button {
+            background-color: #88ff00;
+            color: black;
+            font-weight: 600;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        .tab-button:hover {
+            background-color: #72b801;
+        }
+
+        #sidebar {
+            grid-area: sidebar;
+            background-color: #f0f0f0;
+            padding: 10px;
+        }
+
+        #content {
+            grid-area: content;
+            padding: 10px;
+            overflow-x: auto;
+            max-width: 100%;
+        }
+
+        #graphContainer {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+
+        .record-type {
+            cursor: pointer;
+            padding: 8px;
+            font-weight: bold;
+            border-bottom: 1px solid #ccc;
+            transition: background-color 0.3s;
+        }
+
+        .record-type:hover {
+            background-color: #ddd;
+        }
+
+        .record-type:last-child {
+            border-bottom: none;
+        }
+
+        .row {
+            border: 1px solid #ccc;
+            margin: 5px 0;
+            padding: 10px;
+            background-color: #fff;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .row:hover {
+            /* transform: scale(1.01); */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .row .pointer-info {
+            margin-left: 20px;
+            padding-left: 10px;
+            border-left: 1px solid #ccc;
+        }
+
+        .pointer-info p {
+            margin: 0;
+        }
+
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>HeapView</h1>
+	<p>a heap dump viewer for Go heap dumps</p>
+</header>
+<div id="sidebar">
+    {{range .RecordTypes}}
+        <div class="record-type" data-type="{{.RecordType}}">
+            {{.RecordTypeStr}}
+        </div>
+    {{end}}
+</div>
+<div id="tabs">
+    <button id="recordsTab" class="tab-button">Records</button>
+    <button id="graphTab" class="tab-button">Graph</button>
+</div>
+<div id="content">
+    <!-- Records view -->
+    <div id="recordsView">
+        {{range .Records}}
+            <div class="row {{.RecordType}}">
+                {{.Repr}}
+                {{if .HasPointers}}
+                    <button onclick="toggleRow('{{.RowID}}')">Toggle</button>
+                    <div id="{{.RowID}}" class="pointer-info" style="display: none;">
+                        {{range .Pointers}}
+                            <p>Pointer({{.Index}}) at address 0x{{.Address}} (incoming = 0x{{.Incoming}}, outgoing = 0x{{.Outgoing}})</p>
+                        {{end}}
+                    </div>
+                {{end}}
+            </div>
+        {{end}}
+    </div>
+    
+    <!-- Graph view (initially hidden) -->
+    <div id="graphView" style="display: none;">
+        <div id="graphContainer">
+            <!-- The GraphViz graph will be rendered here using viz.js -->
+        </div>
+    </div>
+</div>
+<footer>
+    <p>Source code: <a href="https://github.com/burntcarrot/heapview">https://github.com/burntcarrot/heapview</a></p>
+</footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/viz.js/2.1.2/viz.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/viz.js/2.1.2/lite.render.js" integrity="sha512-uAHj1knkgGpl0fJcyjbcVY0f9j252eWzEeBxE4s4AQkPJkp/+U+rlfoOXlwreSzPhndCT+5YR00/QSD/nPqb+g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+    function toggleRow(rowId) {
+        var row = document.getElementById(rowId);
+        var pointerInfo = document.getElementById(rowId).querySelector(".pointer-info");
+        if (row.style.display === "none") {
+            row.style.display = "block";
+            pointerInfo.style.display = "block";
+        } else {
+            row.style.display = "none";
+            pointerInfo.style.display = "none";
+        }
+    }
+
+    var recordTypeElements = document.getElementsByClassName("record-type");
+    for (var i = 0; i < recordTypeElements.length; i++) {
+        recordTypeElements[i].addEventListener("click", function() {
+            var selectedType = this.getAttribute("data-type");
+            var rows = document.getElementsByClassName("row");
+            for (var j = 0; j < rows.length; j++) {
+                var row = rows[j];
+                var recordType = row.classList[1];
+                if (recordType === selectedType) {
+                    row.style.display = "block";
+                } else {
+                    row.style.display = "none";
+                }
+            }
+        });
+    }
+
+    // Function to render the GraphViz graph
+    function renderGraph(graphVizContent) {
+        var graphContainer = document.getElementById("graphContainer");
+        
+        // Create a new Viz instance with the graph content and render it
+        var viz = new Viz();
+        viz.renderSVGElement(graphVizContent)
+            .then(function(element) {
+                // Append the SVG element to the container
+                graphContainer.innerHTML = "";
+                graphContainer.appendChild(element);
+            })
+            .catch(function(error) {
+                console.error(error);
+            });
+    }
+
+    // Event listener for the "Graph" tab button
+    document.getElementById("graphTab").addEventListener("click", function() {
+        // Show the graph view and hide the records view
+        document.getElementById("recordsView").style.display = "none";
+        document.getElementById("graphView").style.display = "block";
+
+        // Render the GraphViz graph (replace 'graphVizString' with your actual GraphViz content)
+        var graphVizString = "{{ .GraphVizContent }}";
+        renderGraph(graphVizString);
+    });
+
+    // Event listener for the "Records" tab button
+    document.getElementById("recordsTab").addEventListener("click", function() {
+        // Show the records view and hide the graph view
+        document.getElementById("recordsView").style.display = "block";
+        document.getElementById("graphView").style.display = "none";
+    });
+</script>
+</body>
+</html>
