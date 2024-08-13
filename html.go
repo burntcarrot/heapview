@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"regexp"
@@ -12,9 +13,9 @@ import (
 )
 
 type templateData struct {
-	RecordTypes     []RecordInfo
-	Records         []heaputil.RecordData
-	GraphVizContent string
+	RecordTypes []RecordInfo
+	Records     []heaputil.RecordData
+	GraphData   string
 }
 
 func GenerateHTML(records []heaputil.RecordData, graphContent string) (string, error) {
@@ -24,9 +25,9 @@ func GenerateHTML(records []heaputil.RecordData, graphContent string) (string, e
 	}
 
 	data := templateData{
-		RecordTypes:     GetUniqueRecordTypes(records),
-		Records:         records,
-		GraphVizContent: graphContent,
+		RecordTypes: GetUniqueRecordTypes(records),
+		Records:     records,
+		GraphData:   graphContent,
 	}
 
 	var htmlBuilder strings.Builder
@@ -44,15 +45,9 @@ func GenerateGraph(rd *bufio.Reader) (string, error) {
 		return "", err
 	}
 
-	var dotContent strings.Builder
-
-	// Write DOT file header
-	dotContent.WriteString("digraph GoHeapDump {\n")
-
-	// Create the "heap" node as a cluster
-	dotContent.WriteString("  subgraph cluster_heap {\n")
-	dotContent.WriteString("    label=\"Heap\";\n")
-	dotContent.WriteString("    style=dotted;\n")
+	nodes := []map[string]interface{}{}
+	links := []map[string]interface{}{}
+	nodeMap := make(map[uint64]int)
 
 	var dumpParams *record.DumpParamsRecord
 	counter := 0
@@ -60,7 +55,7 @@ func GenerateGraph(rd *bufio.Reader) (string, error) {
 	for {
 		r, err := record.ReadRecord(rd)
 		if err != nil {
-			return dotContent.String(), err
+			break
 		}
 
 		_, isEOF := r.(*record.EOFRecord)
@@ -73,45 +68,51 @@ func GenerateGraph(rd *bufio.Reader) (string, error) {
 			dumpParams = dp
 		}
 
-		// Filter out objects. If the record isn't of the type Object, ignore.
-		_, isObj := r.(*record.ObjectRecord)
+		obj, isObj := r.(*record.ObjectRecord)
 		if !isObj {
 			continue
 		}
 
-		// Create a DOT node for each record
-		nodeName := fmt.Sprintf("Node%d", counter)
-		counter++
 		name, address := ParseNameAndAddress(r.Repr())
 		nodeLabel := fmt.Sprintf("[%s] %s", name, address)
 
-		// Write DOT node entry within the "heap" cluster
-		s := fmt.Sprintf("    %s [label=\"%s\"];\n", nodeName, nodeLabel)
-		dotContent.WriteString(s)
+		if _, exists := nodeMap[obj.Address]; !exists {
+			nodeMap[obj.Address] = counter
+			nodes = append(nodes, map[string]interface{}{
+				"id":      counter,
+				"label":   nodeLabel,
+				"address": obj.Address,
+			})
+			counter++
+		}
 
-		// Check if the record has pointers
 		p, isParent := r.(record.ParentGuard)
 		if isParent {
 			_, outgoing := record.ParsePointers(p, dumpParams)
 			for i := 0; i < len(outgoing); i++ {
 				if outgoing[i] != 0 {
-					childNodeName := fmt.Sprintf("Pointer0x%x", outgoing[i])
-
-					// Create an edge from the current record to the child record
-					s := fmt.Sprintf("    %s -> %s;\n", nodeName, childNodeName)
-					dotContent.WriteString(s)
+					if targetIndex, exists := nodeMap[outgoing[i]]; exists {
+						links = append(links, map[string]interface{}{
+							"source": nodeMap[obj.Address],
+							"target": targetIndex,
+						})
+					}
 				}
 			}
 		}
 	}
 
-	// Close the "heap" cluster
-	dotContent.WriteString("  }\n")
+	graphData := map[string]interface{}{
+		"nodes": nodes,
+		"links": links,
+	}
 
-	// Write DOT file footer
-	dotContent.WriteString("}\n")
+	jsonData, err := json.Marshal(graphData)
+	if err != nil {
+		return "", err
+	}
 
-	return dotContent.String(), nil
+	return string(jsonData), nil
 }
 
 func ParseNameAndAddress(input string) (name, address string) {
