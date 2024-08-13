@@ -128,6 +128,40 @@
         button:hover {
             background-color: #0056b3;
         }
+
+        #graphControls {
+            display: flex;
+            align-items: center;
+            margin-left: 10px;
+        }
+
+        #searchInput {
+            margin-left: 20px;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        #resetZoom {
+            padding: 5px 10px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        #resetZoom:hover {
+            background-color: #0056b3;
+        }
+
+        .highlight {
+            background-color: yellow;
+        }
+
+        a {
+            color: #007BFF;
+        }
     </style>
 </head>
 <body>
@@ -145,6 +179,10 @@
 <div id="tabs">
     <button id="recordsTab" class="tab-button">Records</button>
     <button id="graphTab" class="tab-button">Graph</button>
+    <input type="text" id="searchInput" placeholder="Search...">
+    <div id="graphControls" style="display: none;">
+        <button id="resetZoom">Reset Zoom</button>
+    </div>
 </div>
 <div id="content">
     <!-- Records view -->
@@ -167,15 +205,14 @@
     <!-- Graph view (initially hidden) -->
     <div id="graphView" style="display: none;">
         <div id="graphContainer">
-            <!-- The GraphViz graph will be rendered here using viz.js -->
+            <!-- The graph will be rendered here using D3.js -->
         </div>
     </div>
 </div>
 <footer>
     <p>Source code: <a href="https://github.com/burntcarrot/heapview">https://github.com/burntcarrot/heapview</a></p>
 </footer>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/viz.js/2.1.2/viz.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/viz.js/2.1.2/lite.render.js" integrity="sha512-uAHj1knkgGpl0fJcyjbcVY0f9j252eWzEeBxE4s4AQkPJkp/+U+rlfoOXlwreSzPhndCT+5YR00/QSD/nPqb+g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
     function toggleRow(rowId) {
         var row = document.getElementById(rowId);
@@ -206,40 +243,181 @@
         });
     }
 
-    // Function to render the GraphViz graph
-    function renderGraph(graphVizContent) {
-        var graphContainer = document.getElementById("graphContainer");
-        
-        // Create a new Viz instance with the graph content and render it
-        var viz = new Viz();
-        viz.renderSVGElement(graphVizContent)
-            .then(function(element) {
-                // Append the SVG element to the container
-                graphContainer.innerHTML = "";
-                graphContainer.appendChild(element);
-            })
-            .catch(function(error) {
-                console.error(error);
+    function renderGraph(graphData) {
+        const data = JSON.parse(graphData);
+        const margin = { top: 20, right: 20, bottom: 20, left: 20 };
+        const width = window.innerWidth - margin.left - margin.right;
+        const height = window.innerHeight - margin.top - margin.bottom - 200;
+
+        d3.select("#graphContainer").selectAll("*").remove();
+
+        const svg = d3.select("#graphContainer")
+            .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom);
+
+        const g = svg.append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 10])
+            .on("zoom", (event) => {
+                g.attr("transform", event.transform);
             });
+
+        svg.call(zoom);
+
+        const simulation = d3.forceSimulation(data.nodes)
+            .force("link", d3.forceLink(data.links).id(d => d.id).distance(30))
+            .force("charge", d3.forceManyBody().strength(-300))
+            .force("center", d3.forceCenter(width / 2, height / 2))
+            .force("collide", d3.forceCollide().radius(30))
+            .force("x", d3.forceX(width / 2).strength(0.1))
+            .force("y", d3.forceY(height / 2).strength(0.1));
+
+        const link = g.append("g")
+            .attr("class", "links")
+            .selectAll("line")
+            .data(data.links)
+            .enter().append("line")
+            .attr("stroke", "#999")
+            .attr("stroke-opacity", 0.6)
+            .attr("stroke-width", 1);
+
+        const node = g.append("g")
+            .attr("class", "nodes")
+            .selectAll("g")
+            .data(data.nodes)
+            .enter().append("g")
+            .call(d3.drag()
+                .on("start", dragstarted)
+                .on("drag", dragged)
+                .on("end", dragended));
+
+        node.append("circle")
+            .attr("r", 8)
+            .attr("fill", "#69b3a2");
+
+        node.append("text")
+            .text(d => d.label)
+            .attr("x", 10)
+            .attr("y", 3)
+            .style("font-size", "8px");
+
+        simulation
+            .nodes(data.nodes)
+            .on("tick", ticked);
+
+        simulation.force("link")
+            .links(data.links);
+
+        function ticked() {
+            link
+                .attr("x1", d => d.source.x)
+                .attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x)
+                .attr("y2", d => d.target.y);
+
+            node
+                .attr("transform", d => `translate(${d.x},${d.y})`);
+        }
+
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        // Search and color nodes
+        const searchInput = document.getElementById("searchInput");
+        searchInput.addEventListener("input", function() {
+            const searchTerm = this.value.toLowerCase();
+            node.each(function(d) {
+                const isMatch = d.label.toLowerCase().includes(searchTerm);
+                d3.select(this).select("circle")
+                    .attr("fill", isMatch ? "#ff0000" : "#69b3a2")
+                    .attr("r", isMatch ? 12 : 8);
+                
+                if (isMatch && searchTerm !== "") {
+                    const transform = d3.zoomTransform(svg.node());
+                    const scale = transform.k;
+                    const x = -d.x * scale + width / 2;
+                    const y = -d.y * scale + height / 2;
+                    svg.transition().duration(750).call(
+                        zoom.transform,
+                        d3.zoomIdentity.translate(x, y).scale(scale)
+                    );
+                }
+            });
+        });
+
+        // Reset zoom
+        const resetZoomButton = document.getElementById("resetZoom");
+        resetZoomButton.addEventListener("click", function() {
+            svg.transition().duration(750).call(
+                zoom.transform,
+                d3.zoomIdentity
+            );
+        });
     }
 
-    // Event listener for the "Graph" tab button
+    // Search and highlight records
+    function searchRecords() {
+        const searchTerm = document.getElementById("searchInput").value.toLowerCase();
+        const rows = document.querySelectorAll("#recordsView .row");
+        
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            if (text.includes(searchTerm)) {
+                row.style.display = "block";
+                highlightText(row, searchTerm);
+            } else {
+                row.style.display = "none";
+            }
+        });
+    }
+
+    function highlightText(element, searchTerm) {
+        const regex = new RegExp(searchTerm, 'gi');
+        element.innerHTML = element.textContent.replace(regex, match => `<span class="highlight">${match}</span>`);
+    }
+
+    document.getElementById("searchInput").addEventListener("input", function() {
+        if (document.getElementById("recordsView").style.display !== "none") {
+            searchRecords();
+        }
+    });
+
     document.getElementById("graphTab").addEventListener("click", function() {
-        // Show the graph view and hide the records view
         document.getElementById("recordsView").style.display = "none";
         document.getElementById("graphView").style.display = "block";
+        document.getElementById("graphControls").style.display = "flex";
+        document.getElementById("searchInput").placeholder = "Search nodes...";
 
-        // Render the GraphViz graph (replace 'graphVizString' with your actual GraphViz content)
-        var graphVizString = "{{ .GraphVizContent }}";
-        renderGraph(graphVizString);
+        var graphDataString = '{{ .GraphData }}';
+        renderGraph(graphDataString);
     });
 
-    // Event listener for the "Records" tab button
     document.getElementById("recordsTab").addEventListener("click", function() {
-        // Show the records view and hide the graph view
         document.getElementById("recordsView").style.display = "block";
         document.getElementById("graphView").style.display = "none";
+        document.getElementById("graphControls").style.display = "none";
+        document.getElementById("searchInput").placeholder = "Search records...";
+        searchRecords();
     });
+
+    searchRecords();
 </script>
 </body>
 </html>
